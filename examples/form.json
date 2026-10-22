@@ -1,0 +1,69 @@
+{
+  "$schema": "../schema.json",
+  "title": "Create account",
+  "width": "58%",
+  "min_width": 56,
+  "max_width": 72,
+  "padding": 1,
+  "children": [
+    {
+      "type": "label",
+      "text": "Fill in the details below.",
+      "style": { "bold": true }
+    },
+    {
+      "type": "box",
+      "title": "Account",
+      "padding": 0,
+      "children": [
+        {
+          "type": "text",
+          "id": "username",
+          "label": "Username",
+          "placeholder": "ada"
+        },
+        {
+          "type": "text",
+          "id": "password",
+          "label": "Password",
+          "password": true
+        },
+        {
+          "type": "checkbox",
+          "id": "admin",
+          "label": "Administrator account"
+        }
+      ]
+    },
+    {
+      "type": "radio",
+      "id": "shell",
+      "label": "Login shell",
+      "options": ["bash", "zsh", "fish"],
+      "selected": 0
+    },
+    {
+      "type": "select",
+      "id": "timezone",
+      "label": "Timezone",
+      "options": [
+        { "label": "UTC", "value": "UTC" },
+        { "label": "US/Eastern", "value": "America/New_York" },
+        { "label": "Europe/Berlin", "value": "Europe/Berlin" },
+        { "label": "Asia/Tokyo", "value": "Asia/Tokyo" }
+      ]
+    },
+    {
+      "type": "slider",
+      "id": "priority",
+      "label": "Priority",
+      "min": 0,
+      "max": 10,
+      "value": 5
+    }
+  ],
+  "buttons": [
+    { "label": "Cancel", "action": "cancel" },
+    { "label": "Create", "action": "submit", "kind": "primary" }
+  ]
+}

@@ -1,0 +1,359 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arozoid/ratl/schema.json",
+  "title": "ratl dialog",
+  "description": "A declarative terminal dialog rendered by ratl.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["children"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string",
+      "default": "ratl"
+    },
+    "theme": {
+      "$ref": "#/$defs/theme"
+    },
+    "width": {
+      "$ref": "#/$defs/dimension"
+    },
+    "min_width": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 40
+    },
+    "max_width": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 100
+    },
+    "padding": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 20,
+      "default": 1
+    },
+    "children": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/element"
+      }
+    },
+    "buttons": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/button"
+      },
+      "default": [
+        {
+          "label": "OK",
+          "action": "submit",
+          "kind": "primary"
+        },
+        {
+          "label": "Cancel",
+          "action": "cancel"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "color": {
+      "description": "A ratatui colour. Names, hex strings, ANSI indexes, or RGB triples are accepted.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "minItems": 3,
+          "maxItems": 3
+        }
+      ]
+    },
+    "style": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fg": { "$ref": "#/$defs/color" },
+        "bg": { "$ref": "#/$defs/color" },
+        "bold": { "type": "boolean" },
+        "italic": { "type": "boolean" },
+        "underlined": { "type": "boolean" },
+        "dim": { "type": "boolean" }
+      }
+    },
+    "theme": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "foreground": { "$ref": "#/$defs/color" },
+        "background": { "$ref": "#/$defs/color" },
+        "label": { "$ref": "#/$defs/color" },
+        "muted": { "$ref": "#/$defs/color" },
+        "border": { "$ref": "#/$defs/color" },
+        "title": { "$ref": "#/$defs/color" },
+        "accent": { "$ref": "#/$defs/color" },
+        "focus_foreground": { "$ref": "#/$defs/color" },
+        "focus_background": { "$ref": "#/$defs/color" },
+        "input_foreground": { "$ref": "#/$defs/color" },
+        "input_background": { "$ref": "#/$defs/color" },
+        "danger": { "$ref": "#/$defs/color" },
+        "error": { "$ref": "#/$defs/color" }
+      }
+    },
+    "dimension": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "string",
+          "pattern": "^[0-9]+%?$"
+        }
+      ]
+    },
+    "direction": {
+      "type": "string",
+      "enum": ["column", "row"]
+    },
+    "alignment": {
+      "type": "string",
+      "enum": ["left", "center", "right"]
+    },
+    "border": {
+      "type": "string",
+      "enum": ["none", "plain", "rounded", "double", "thick"]
+    },
+    "choice_option": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label"],
+          "properties": {
+            "label": { "type": "string" },
+            "value": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "button": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string", "minLength": 1 },
+        "action": {
+          "type": "string",
+          "enum": ["submit", "cancel", "reset"],
+          "default": "submit"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["normal", "primary", "danger"],
+          "default": "normal"
+        }
+      }
+    },
+    "label": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "text"],
+      "properties": {
+        "type": { "const": "label" },
+        "text": { "type": "string" },
+        "style": { "$ref": "#/$defs/style" },
+        "align": { "$ref": "#/$defs/alignment" }
+      }
+    },
+    "separator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "separator" },
+        "style": { "$ref": "#/$defs/style" }
+      }
+    },
+    "spacer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "spacer" },
+        "height": { "type": "integer", "minimum": 0, "default": 1 }
+      }
+    },
+    "box": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "box" },
+        "title": { "type": "string" },
+        "direction": { "$ref": "#/$defs/direction" },
+        "border": { "$ref": "#/$defs/border" },
+        "padding": { "type": "integer", "minimum": 0, "default": 1 },
+        "gap": { "type": "integer", "minimum": 0, "default": 0 },
+        "style": { "$ref": "#/$defs/style" },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/element" }
+        }
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "row" },
+        "gap": { "type": "integer", "minimum": 0, "default": 0 },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/element" }
+        }
+      }
+    },
+    "column": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "column" },
+        "gap": { "type": "integer", "minimum": 0, "default": 0 },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/element" }
+        }
+      }
+    },
+    "grid": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "grid" },
+        "columns": { "type": "integer", "minimum": 1, "default": 2 },
+        "column_gap": { "type": "integer", "minimum": 0, "default": 0 },
+        "row_gap": { "type": "integer", "minimum": 0, "default": 0 },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/element" }
+        }
+      }
+    },
+    "checkbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "label"],
+      "properties": {
+        "type": { "const": "checkbox" },
+        "id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "checked": { "type": "boolean", "default": false },
+        "style": { "$ref": "#/$defs/style" }
+      }
+    },
+    "radio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "options"],
+      "properties": {
+        "type": { "const": "radio" },
+        "id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/choice_option" }
+        },
+        "selected": { "type": "integer", "minimum": 0, "default": 0 },
+        "style": { "$ref": "#/$defs/style" }
+      }
+    },
+    "text": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "const": "text" },
+        "id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "value": { "type": "string", "default": "" },
+        "placeholder": { "type": "string" },
+        "password": { "type": "boolean", "default": false },
+        "max_length": { "type": "integer", "minimum": 1 },
+        "style": { "$ref": "#/$defs/style" }
+      }
+    },
+    "select": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "options"],
+      "properties": {
+        "type": { "const": "select" },
+        "id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/choice_option" }
+        },
+        "selected": { "type": "integer", "minimum": 0, "default": 0 },
+        "style": { "$ref": "#/$defs/style" }
+      }
+    },
+    "slider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "const": "slider" },
+        "id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "min": { "type": "integer", "default": 0 },
+        "max": { "type": "integer", "default": 100 },
+        "step": { "type": "integer", "minimum": 1, "default": 1 },
+        "value": { "type": "integer" },
+        "style": { "$ref": "#/$defs/style" }
+      }
+    },
+    "element": {
+      "oneOf": [
+        { "$ref": "#/$defs/label" },
+        { "$ref": "#/$defs/separator" },
+        { "$ref": "#/$defs/spacer" },
+        { "$ref": "#/$defs/box" },
+        { "$ref": "#/$defs/row" },
+        { "$ref": "#/$defs/column" },
+        { "$ref": "#/$defs/grid" },
+        { "$ref": "#/$defs/checkbox" },
+        { "$ref": "#/$defs/radio" },
+        { "$ref": "#/$defs/text" },
+        { "$ref": "#/$defs/select" },
+        { "$ref": "#/$defs/slider" }
+      ]
+    }
+  }
+}

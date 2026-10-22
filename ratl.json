@@ -1,0 +1,134 @@
+{
+  "$schema": "./schema.json",
+  "title": "ratl demo",
+  "width": "80%",
+  "min_width": 60,
+  "max_width": 92,
+  "padding": 1,
+  "theme": {
+    "foreground": "#cdd6f4",
+    "background": "#1e1e2e",
+    "label": "#cdd6f4",
+    "muted": "#6c7086",
+    "border": "#89b4fa",
+    "title": "#89b4fa",
+    "accent": "#a6e3a1",
+    "focus_foreground": "#1e1e2e",
+    "focus_background": "#89b4fa",
+    "input_foreground": "#cdd6f4",
+    "input_background": "#313244",
+    "danger": "#f38ba8",
+    "error": "#f38ba8"
+  },
+  "children": [
+    {
+      "type": "label",
+      "text": "A JSON-described form rendered entirely in the terminal.",
+      "style": { "bold": true }
+    },
+    {
+      "type": "box",
+      "title": "Profile",
+      "direction": "column",
+      "padding": 0,
+      "gap": 0,
+      "children": [
+        {
+          "type": "text",
+          "id": "name",
+          "label": "Name",
+          "value": "Ada Lovelace",
+          "placeholder": "Your name"
+        },
+        {
+          "type": "row",
+          "gap": 2,
+          "children": [
+            {
+              "type": "text",
+              "id": "email",
+              "label": "Email",
+              "value": "ada@example.com"
+            },
+            {
+              "type": "text",
+              "id": "handle",
+              "label": "Handle",
+              "value": "@ada",
+              "max_length": 24
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "grid",
+      "columns": 2,
+      "column_gap": 2,
+      "children": [
+        {
+          "type": "checkbox",
+          "id": "notifications",
+          "label": "Desktop notifications",
+          "checked": true
+        },
+        {
+          "type": "checkbox",
+          "id": "autosave",
+          "label": "Auto-save changes"
+        },
+        {
+          "type": "select",
+          "id": "theme",
+          "label": "Theme",
+          "options": ["Catppuccin", "Nord", "Gruvbox"],
+          "selected": 0
+        },
+        {
+          "type": "slider",
+          "id": "volume",
+          "label": "Volume",
+          "min": 0,
+          "max": 100,
+          "step": 5,
+          "value": 60
+        }
+      ]
+    },
+    {
+      "type": "box",
+      "title": "Session",
+      "direction": "column",
+      "padding": 0,
+      "gap": 0,
+      "children": [
+        {
+          "type": "radio",
+          "id": "mode",
+          "label": "Startup mode",
+          "options": [
+            { "label": "Normal", "value": "normal" },
+            { "label": "Safe", "value": "safe" },
+            { "label": "Recovery", "value": "recovery" }
+          ],
+          "selected": 0
+        },
+        {
+          "type": "checkbox",
+          "id": "remember",
+          "label": "Remember this choice"
+        }
+      ]
+    },
+    {
+      "type": "label",
+      "text": "Tab/Shift-Tab moves focus · arrows change choices · Enter submits · Esc cancels",
+      "style": { "dim": true }
+    }
+  ],
+  "buttons": [
+    { "id": "reset", "label": "Reset", "action": "reset" },
+    { "id": "cancel", "label": "Cancel", "action": "cancel" },
+    { "id": "ok", "label": "Save", "action": "submit", "kind": "primary" }
+  ]
+}
