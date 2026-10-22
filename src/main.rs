@@ -17,7 +17,7 @@ use crossterm::terminal::{
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use app::{App, KeyAction, Outcome, OutcomeAction};
 use model::{Dialog, control_count};
@@ -106,7 +106,37 @@ fn load_dialog(cli: &Cli) -> Result<Dialog> {
         bail!("no dialog file given; pass a JSON file, use --json, or create {DEFAULT_FILE}");
     };
 
-    serde_json::from_str(&raw).context("invalid dialog JSON")
+    parse_dialog(&raw)
+}
+
+fn parse_dialog(raw: &str) -> Result<Dialog> {
+    match serde_json::from_str::<Dialog>(raw) {
+        Ok(dialog) => Ok(dialog),
+        Err(error) => {
+            if let Ok(value) = serde_json::from_str::<Value>(raw)
+                && looks_like_schema(&value)
+            {
+                bail!(
+                    "this looks like a JSON Schema, not a ratl dialog; \
+                     run `ratl --schema` to print the schema, or pass a dialog file such as `ratl.json`"
+                );
+            }
+            Err(error).context("invalid dialog JSON")
+        }
+    }
+}
+
+fn looks_like_schema(value: &Value) -> bool {
+    let object = match value.as_object() {
+        Some(object) => object,
+        None => return false,
+    };
+    if object.contains_key("$defs") || object.contains_key("$id") {
+        return true;
+    }
+    object.get("type").and_then(Value::as_str) == Some("object")
+        && object.contains_key("properties")
+        && !object.contains_key("children")
 }
 
 fn read_json_file(path: &Path) -> Result<String> {
