@@ -4,6 +4,7 @@ mod app;
 mod model;
 mod ui;
 
+use std::fs::OpenOptions;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -90,23 +91,50 @@ fn run() -> Result<ExitCode> {
 }
 
 fn load_dialog(cli: &Cli) -> Result<Dialog> {
-    let raw = if let Some(json) = &cli.json {
-        json.clone()
-    } else if let Some(file) = &cli.file {
-        read_json_file(file)?
-    } else if Path::new(DEFAULT_FILE).is_file() {
-        read_json_file(Path::new(DEFAULT_FILE))?
-    } else if !io::stdin().is_terminal() {
+    if let Some(json) = &cli.json {
+        let mut dialog = parse_dialog(json)?;
+        dialog.base_dir = std::env::current_dir().ok();
+        return Ok(dialog);
+    }
+
+    if let Some(file) = &cli.file {
+        let raw = read_json_file(file)?;
+        let mut dialog = parse_dialog(&raw)?;
+        dialog.base_dir = dialog_base_dir(file);
+        return Ok(dialog);
+    }
+
+    let default_file = Path::new(DEFAULT_FILE);
+    if default_file.is_file() {
+        let raw = read_json_file(default_file)?;
+        let mut dialog = parse_dialog(&raw)?;
+        dialog.base_dir = dialog_base_dir(default_file);
+        return Ok(dialog);
+    }
+
+    if !io::stdin().is_terminal() {
         let mut buffer = String::new();
         io::stdin()
             .read_to_string(&mut buffer)
             .context("failed to read dialog JSON from stdin")?;
-        buffer
-    } else {
-        bail!("no dialog file given; pass a JSON file, use --json, or create {DEFAULT_FILE}");
-    };
+        let mut dialog = parse_dialog(&buffer)?;
+        dialog.base_dir = std::env::current_dir().ok();
+        return Ok(dialog);
+    }
 
-    parse_dialog(&raw)
+    bail!("no dialog file given; pass a JSON file, use --json, or create {DEFAULT_FILE}");
+}
+
+fn dialog_base_dir(path: &Path) -> Option<PathBuf> {
+    if path == Path::new("-") {
+        return std::env::current_dir().ok();
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    Some(if parent.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        parent.to_path_buf()
+    })
 }
 
 fn parse_dialog(raw: &str) -> Result<Dialog> {
@@ -151,7 +179,7 @@ fn read_json_file(path: &Path) -> Result<String> {
 }
 
 fn run_tui(dialog: Dialog) -> Result<Outcome> {
-    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+    if !io::stdin().is_terminal() {
         bail!("ratl needs an interactive terminal (use --validate for non-interactive checks)");
     }
 
@@ -171,23 +199,45 @@ fn run_tui(dialog: Dialog) -> Result<Outcome> {
     }
 }
 
+// The UI normally goes to stdout. When stdout is redirected or captured (for
+// example `result=$(ratl ...)`), draw on the controlling terminal instead so
+// the JSON result can still be written to stdout. stdin must stay interactive
+// because that is where the key events come from.
+fn terminal_output() -> Result<Box<dyn Write>> {
+    if io::stdout().is_terminal() {
+        return Ok(Box::new(io::stdout()));
+    }
+    let tty = OpenOptions::new()
+        .write(true)
+        .open("/dev/tty")
+        .context("ratl needs an interactive terminal (stdout is not a terminal and /dev/tty cannot be opened)")?;
+    Ok(Box::new(tty))
+}
+
+fn leave_alternate_screen() {
+    if let Ok(mut output) = terminal_output() {
+        let _ = execute!(output, LeaveAlternateScreen);
+        let _ = output.flush();
+    }
+}
+
 struct TerminalSession {
-    terminal: Terminal<CrosstermBackend<io::Stdout>>,
+    terminal: Terminal<CrosstermBackend<Box<dyn Write>>>,
 }
 
 impl TerminalSession {
     fn new() -> Result<Self> {
+        let mut output = terminal_output()?;
         enable_raw_mode().context("failed to enable raw terminal mode")?;
-        let mut stdout = io::stdout();
-        if let Err(error) = execute!(stdout, EnterAlternateScreen) {
+        if let Err(error) = execute!(output, EnterAlternateScreen) {
             let _ = disable_raw_mode();
             return Err(error).context("failed to enter the alternate screen");
         }
-        match Terminal::new(CrosstermBackend::new(stdout)) {
+        match Terminal::new(CrosstermBackend::new(output)) {
             Ok(terminal) => Ok(Self { terminal }),
             Err(error) => {
                 let _ = disable_raw_mode();
-                let _ = execute!(io::stdout(), LeaveAlternateScreen);
+                leave_alternate_screen();
                 Err(error).context("failed to initialize terminal")
             }
         }
@@ -199,6 +249,6 @@ impl Drop for TerminalSession {
         let _ = disable_raw_mode();
         let _ = self.terminal.show_cursor();
         let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
-        let _ = io::stdout().flush();
+        let _ = self.terminal.flush();
     }
 }

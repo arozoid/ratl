@@ -1,11 +1,20 @@
 //! Runtime state, keyboard handling, and result serialization.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
+use image::RgbaImage;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::{Map, Value};
 
 use crate::model::{ButtonAction, ChoiceOption, Dialog, Element};
+
+/// A decoded image, kept in RGBA so the renderer can blend transparency over
+/// the dialog background.
+#[derive(Debug, Clone)]
+pub struct LoadedImage {
+    pub image: RgbaImage,
+}
 
 #[derive(Debug, Clone)]
 pub enum ControlState {
@@ -95,6 +104,8 @@ pub struct App {
     pub focusables: Vec<FocusTarget>,
     pub focus: usize,
     pub scroll: u16,
+    /// Decoded images keyed by the path exactly as it appears in the dialog.
+    pub images: HashMap<String, Result<LoadedImage, String>>,
 }
 
 impl App {
@@ -107,6 +118,7 @@ impl App {
         for (index, _) in dialog.buttons.iter().enumerate() {
             focusables.push(FocusTarget::Button(index));
         }
+        let images = load_images(&dialog.children, dialog.base_dir.as_deref());
 
         Ok(Self {
             dialog,
@@ -114,6 +126,7 @@ impl App {
             focusables,
             focus: 0,
             scroll: 0,
+            images,
         })
     }
 
@@ -456,6 +469,75 @@ fn char_to_byte(value: &str, char_index: usize) -> usize {
         .char_indices()
         .nth(char_index)
         .map_or(value.len(), |(index, _)| index)
+}
+
+fn load_images(
+    elements: &[Element],
+    base_dir: Option<&Path>,
+) -> HashMap<String, Result<LoadedImage, String>> {
+    let mut images = HashMap::new();
+    collect_images(elements, base_dir, &mut images);
+    images
+}
+
+fn collect_images(
+    elements: &[Element],
+    base_dir: Option<&Path>,
+    images: &mut HashMap<String, Result<LoadedImage, String>>,
+) {
+    for element in elements {
+        if let Element::Image { path, .. } = element {
+            images
+                .entry(path.clone())
+                .or_insert_with(|| load_image(path, base_dir));
+        }
+        if let Some(children) = element.children() {
+            collect_images(children, base_dir, images);
+        }
+    }
+}
+
+fn load_image(raw: &str, base_dir: Option<&Path>) -> Result<LoadedImage, String> {
+    let path = resolve_image_path(raw, base_dir);
+    let image =
+        image::open(&path).map_err(|error| format!("cannot load {}: {error}", path.display()))?;
+    Ok(LoadedImage {
+        image: image.to_rgba8(),
+    })
+}
+
+fn resolve_image_path(raw: &str, base_dir: Option<&Path>) -> PathBuf {
+    let path = expand_home(raw);
+    if path.is_absolute() {
+        path
+    } else if let Some(base_dir) = base_dir {
+        base_dir.join(path)
+    } else {
+        path
+    }
+}
+
+fn expand_home(raw: &str) -> PathBuf {
+    let home = || std::env::var_os("HOME").map(PathBuf::from);
+    if raw == "~" {
+        return home().unwrap_or_else(|| PathBuf::from(raw));
+    }
+    if let Some(rest) = raw.strip_prefix("~/") {
+        return home()
+            .map(|home| home.join(rest))
+            .unwrap_or_else(|| PathBuf::from(raw));
+    }
+    if let Some(rest) = raw.strip_prefix("${HOME}/") {
+        return home()
+            .map(|home| home.join(rest))
+            .unwrap_or_else(|| PathBuf::from(raw));
+    }
+    if let Some(rest) = raw.strip_prefix("$HOME/") {
+        return home()
+            .map(|home| home.join(rest))
+            .unwrap_or_else(|| PathBuf::from(raw));
+    }
+    PathBuf::from(raw)
 }
 
 fn collect_state(

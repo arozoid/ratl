@@ -2,16 +2,25 @@
 
 use std::collections::HashMap;
 
+use image::RgbaImage;
+use image::imageops::{self, FilterType};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Margin, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{App, ControlState};
-use crate::model::{BorderStyle, ButtonKind, Direction, Element};
+use crate::app::{App, ControlState, LoadedImage};
+use crate::model::{
+    Align, BorderStyle, ButtonKind, Direction, Element, ImageFit, StyleSpec, VerticalAlign,
+};
+
+/// A select shows a scrolling window instead of the whole list. Eight options
+/// fits the settings dialogs comfortably and still makes it obvious that there
+/// is more than the current value.
+const SELECT_VISIBLE_OPTIONS: usize = 8;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
@@ -235,6 +244,29 @@ fn render_element(
             buffer.set_stringn(area.x, area.y, line, area.width as usize, style);
         }
         Element::Spacer { .. } => {}
+        Element::Image {
+            path,
+            width,
+            fit,
+            align,
+            valign,
+            alt,
+            style,
+            ..
+        } => {
+            render_image(
+                context,
+                path,
+                *width,
+                *fit,
+                *align,
+                *valign,
+                alt.as_deref(),
+                style,
+                area,
+                buffer,
+            );
+        }
         Element::Box {
             title,
             direction,
@@ -452,42 +484,113 @@ fn render_element(
         } => {
             context.focus_rects.insert(id.clone(), area);
             let state = context.app.state(id);
-            let current = match state {
-                Some(ControlState::Choice { selected, .. }) => *selected,
-                _ => *selected,
+            let (current, option_labels) = match state {
+                Some(ControlState::Choice { options, selected }) => (
+                    *selected,
+                    options
+                        .iter()
+                        .map(|option| option.label.clone())
+                        .collect::<Vec<_>>(),
+                ),
+                _ => (
+                    *selected,
+                    options
+                        .iter()
+                        .map(|option| match option {
+                            crate::model::ChoiceOptionDef::Plain(value) => value.clone(),
+                            crate::model::ChoiceOptionDef::Detailed { label, .. } => label.clone(),
+                        })
+                        .collect::<Vec<_>>(),
+                ),
             };
-            let value = options.get(current).map_or("", |option| match option {
-                crate::model::ChoiceOptionDef::Plain(value) => value.as_str(),
-                crate::model::ChoiceOptionDef::Detailed { label, .. } => label.as_str(),
-            });
             let focused = context.focused_control == Some(id.as_str());
             let base = style.apply(context.app.dialog.theme.label());
+            let total = option_labels.len();
             let mut line_y = area.y;
             if let Some(label) = label
                 && !label.is_empty()
                 && area.height > 1
             {
-                buffer.set_stringn(area.x, line_y, label, area.width as usize, base);
+                let heading = if total > SELECT_VISIBLE_OPTIONS {
+                    format!(
+                        "{label}  [{}/{}]",
+                        current.saturating_add(1).min(total),
+                        total
+                    )
+                } else {
+                    label.clone()
+                };
+                buffer.set_stringn(area.x, line_y, heading, area.width as usize, base);
                 line_y = line_y.saturating_add(1);
             }
-            if line_y >= area.bottom() {
+            if total == 0 {
+                if line_y < area.bottom() {
+                    buffer.set_stringn(
+                        area.x,
+                        line_y,
+                        "(no options)",
+                        area.width as usize,
+                        context.app.dialog.theme.muted(),
+                    );
+                }
                 return;
             }
-            let line_area = Rect::new(area.x, line_y, area.width, 1);
-            let line_style = if focused {
-                context.app.dialog.theme.focus()
+            let current = current.min(total - 1);
+            let visible = usize::from(area.height.saturating_sub(line_y.saturating_sub(area.y)))
+                .min(SELECT_VISIBLE_OPTIONS)
+                .min(total);
+            if visible == 0 {
+                return;
+            }
+            let start = if total <= visible {
+                0
             } else {
-                style.apply(context.app.dialog.theme.input())
+                current.saturating_sub(visible / 2).min(total - visible)
             };
-            buffer.set_style(line_area, line_style);
-            let line = format!("▾ {value}");
-            buffer.set_stringn(
-                line_area.x,
-                line_area.y,
-                line,
-                line_area.width as usize,
-                line_style,
-            );
+            for index in start..start + visible {
+                if line_y >= area.bottom() {
+                    break;
+                }
+                let marker = if index == current { "(*)" } else { "( )" };
+                let line = format!("{marker} {}", option_labels[index]);
+                let line_style = if focused && index == current {
+                    context.app.dialog.theme.focus()
+                } else if index == current {
+                    context.app.dialog.theme.accent()
+                } else {
+                    base
+                };
+                let line_area = Rect::new(area.x, line_y, area.width, 1);
+                buffer.set_style(line_area, line_style);
+                buffer.set_stringn(
+                    line_area.x,
+                    line_area.y,
+                    line,
+                    line_area.width as usize,
+                    line_style,
+                );
+                if area.width > 0 {
+                    if index == start && start > 0 {
+                        buffer.set_stringn(
+                            area.right().saturating_sub(1),
+                            line_y,
+                            "↑",
+                            1,
+                            context.app.dialog.theme.muted(),
+                        );
+                    }
+                    if index == start + visible - 1 && start + visible < total {
+                        buffer.set_stringn(
+                            area.right().saturating_sub(1),
+                            line_y,
+                            "↓",
+                            1,
+                            context.app.dialog.theme.muted(),
+                        );
+                    }
+                }
+                line_y = line_y.saturating_add(1);
+            }
         }
         Element::Slider {
             id,
@@ -550,6 +653,233 @@ fn render_element(
             );
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_image(
+    context: &RenderContext<'_>,
+    path: &str,
+    width: Option<crate::model::Dimension>,
+    fit: ImageFit,
+    align: Align,
+    valign: VerticalAlign,
+    alt: Option<&str>,
+    style: &StyleSpec,
+    area: Rect,
+    buffer: &mut Buffer,
+) {
+    let base = style.apply(context.app.dialog.theme.base());
+    buffer.set_style(area, base);
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let requested_width = width
+        .map_or(area.width, |width| width.resolve(area.width))
+        .min(area.width)
+        .max(1);
+    let offset = match align {
+        Align::Left => 0,
+        Align::Center => area.width.saturating_sub(requested_width) / 2,
+        Align::Right => area.width.saturating_sub(requested_width),
+    };
+    let image_area = Rect {
+        x: area.x.saturating_add(offset),
+        y: area.y,
+        width: requested_width,
+        height: area.height,
+    };
+
+    match context.app.images.get(path) {
+        Some(Ok(loaded)) => {
+            let background = color_to_rgb(base.bg.unwrap_or(Color::Reset));
+            draw_loaded_image(loaded, image_area, fit, valign, background, &base, buffer);
+        }
+        Some(Err(error)) => {
+            draw_image_error(context, image_area, alt, error, style, buffer);
+        }
+        None => {
+            draw_image_error(
+                context,
+                image_area,
+                alt,
+                "image was not loaded",
+                style,
+                buffer,
+            );
+        }
+    }
+}
+
+fn draw_loaded_image(
+    loaded: &LoadedImage,
+    area: Rect,
+    fit: ImageFit,
+    valign: VerticalAlign,
+    background: [u8; 3],
+    base_style: &Style,
+    buffer: &mut Buffer,
+) {
+    let canvas_width = u32::from(area.width);
+    let canvas_height = u32::from(area.height).saturating_mul(2);
+    let image = &loaded.image;
+    if canvas_width == 0 || canvas_height == 0 || image.width() == 0 || image.height() == 0 {
+        return;
+    }
+
+    let (rendered, x_offset, y_offset) = match fit {
+        ImageFit::Contain => {
+            let (draw_width, draw_height) =
+                contain_size(image.width(), image.height(), canvas_width, canvas_height);
+            let rendered = imageops::resize(image, draw_width, draw_height, FilterType::Triangle);
+            let x_offset = (canvas_width - draw_width) / 2;
+            let y_offset = match valign {
+                VerticalAlign::Top => 0,
+                VerticalAlign::Center => (canvas_height - draw_height) / 2,
+                VerticalAlign::Bottom => canvas_height - draw_height,
+            };
+            (rendered, x_offset, y_offset)
+        }
+        ImageFit::Cover => (cover_image(image, canvas_width, canvas_height), 0, 0),
+        ImageFit::Stretch => (
+            imageops::resize(image, canvas_width, canvas_height, FilterType::Triangle),
+            0,
+            0,
+        ),
+    };
+
+    for row in 0..area.height {
+        let top_y = u32::from(row).saturating_mul(2);
+        let bottom_y = top_y.saturating_add(1);
+        for column in 0..area.width {
+            let x = u32::from(column);
+            let top = pixel_at(&rendered, x, top_y, x_offset, y_offset);
+            let bottom = pixel_at(&rendered, x, bottom_y, x_offset, y_offset);
+            let cell = &mut buffer[(area.x + column, area.y + row)];
+            match (top, bottom) {
+                (None, None) => {
+                    cell.set_symbol(" ");
+                    cell.set_style(*base_style);
+                }
+                (Some(top), Some(bottom)) => {
+                    cell.set_symbol("▀");
+                    let top = blend(top, background);
+                    let bottom = blend(bottom, background);
+                    cell.set_fg(Color::Rgb(top[0], top[1], top[2]));
+                    cell.set_bg(Color::Rgb(bottom[0], bottom[1], bottom[2]));
+                }
+                (Some(top), None) => {
+                    cell.set_symbol("▀");
+                    let top = blend(top, background);
+                    cell.set_fg(Color::Rgb(top[0], top[1], top[2]));
+                    cell.set_bg(Color::Rgb(background[0], background[1], background[2]));
+                }
+                (None, Some(bottom)) => {
+                    cell.set_symbol("▄");
+                    let bottom = blend(bottom, background);
+                    cell.set_fg(Color::Rgb(bottom[0], bottom[1], bottom[2]));
+                    cell.set_bg(Color::Rgb(background[0], background[1], background[2]));
+                }
+            }
+        }
+    }
+}
+
+fn contain_size(
+    image_width: u32,
+    image_height: u32,
+    canvas_width: u32,
+    canvas_height: u32,
+) -> (u32, u32) {
+    let scale =
+        (canvas_width as f64 / image_width as f64).min(canvas_height as f64 / image_height as f64);
+    let width = ((image_width as f64 * scale).round() as u32).clamp(1, canvas_width);
+    let height = ((image_height as f64 * scale).round() as u32).clamp(1, canvas_height);
+    (width, height)
+}
+
+fn cover_image(image: &RgbaImage, canvas_width: u32, canvas_height: u32) -> RgbaImage {
+    let image_width = image.width();
+    let image_height = image.height();
+    let canvas_aspect = canvas_width as f64 / canvas_height as f64;
+    let image_aspect = image_width as f64 / image_height as f64;
+    let cropped = if image_aspect > canvas_aspect {
+        let width = ((image_height as f64 * canvas_aspect).round() as u32).clamp(1, image_width);
+        let x = (image_width - width) / 2;
+        imageops::crop_imm(image, x, 0, width, image_height).to_image()
+    } else {
+        let height = ((image_width as f64 / canvas_aspect).round() as u32).clamp(1, image_height);
+        let y = (image_height - height) / 2;
+        imageops::crop_imm(image, 0, y, image_width, height).to_image()
+    };
+    imageops::resize(&cropped, canvas_width, canvas_height, FilterType::Triangle)
+}
+
+fn pixel_at(
+    image: &RgbaImage,
+    canvas_x: u32,
+    canvas_y: u32,
+    x_offset: u32,
+    y_offset: u32,
+) -> Option<[u8; 4]> {
+    let x = canvas_x.checked_sub(x_offset)?;
+    let y = canvas_y.checked_sub(y_offset)?;
+    if x >= image.width() || y >= image.height() {
+        return None;
+    }
+    let pixel = image.get_pixel(x, y);
+    Some([pixel[0], pixel[1], pixel[2], pixel[3]])
+}
+
+fn blend(pixel: [u8; 4], background: [u8; 3]) -> [u8; 3] {
+    let alpha = u32::from(pixel[3]);
+    let inverse = 255_u32.saturating_sub(alpha);
+    [
+        ((u32::from(pixel[0]) * alpha + u32::from(background[0]) * inverse) / 255) as u8,
+        ((u32::from(pixel[1]) * alpha + u32::from(background[1]) * inverse) / 255) as u8,
+        ((u32::from(pixel[2]) * alpha + u32::from(background[2]) * inverse) / 255) as u8,
+    ]
+}
+
+fn color_to_rgb(color: Color) -> [u8; 3] {
+    match color {
+        Color::Rgb(red, green, blue) => [red, green, blue],
+        Color::Black => [0, 0, 0],
+        Color::Red => [128, 0, 0],
+        Color::Green => [0, 128, 0],
+        Color::Yellow => [128, 128, 0],
+        Color::Blue => [0, 0, 128],
+        Color::Magenta => [128, 0, 128],
+        Color::Cyan => [0, 128, 128],
+        Color::Gray => [192, 192, 192],
+        Color::DarkGray => [128, 128, 128],
+        Color::LightRed => [255, 0, 0],
+        Color::LightGreen => [0, 255, 0],
+        Color::LightYellow => [255, 255, 0],
+        Color::LightBlue => [0, 0, 255],
+        Color::LightMagenta => [255, 0, 255],
+        Color::LightCyan => [0, 255, 255],
+        Color::White => [255, 255, 255],
+        _ => [0, 0, 0],
+    }
+}
+
+fn draw_image_error(
+    context: &RenderContext<'_>,
+    area: Rect,
+    alt: Option<&str>,
+    error: &str,
+    style: &StyleSpec,
+    buffer: &mut Buffer,
+) {
+    let message = match alt {
+        Some(alt) if !alt.is_empty() => format!("{alt}\n{error}"),
+        _ => format!("image: {error}"),
+    };
+    let paragraph = Paragraph::new(message)
+        .style(style.apply(context.app.dialog.theme.muted()))
+        .wrap(Wrap { trim: false });
+    paragraph.render(area, buffer);
 }
 
 fn render_grid(
@@ -663,6 +993,7 @@ fn element_height(element: &Element, width: u16) -> u16 {
         Element::Label { text, .. } => wrapped_height(text, width),
         Element::Separator { .. } => 1,
         Element::Spacer { height } => *height,
+        Element::Image { height, .. } => *height,
         Element::Box {
             direction,
             border,
@@ -719,9 +1050,13 @@ fn element_height(element: &Element, width: u16) -> u16 {
             u16::from(label.as_ref().is_some_and(|label| !label.is_empty()))
                 .saturating_add(options.len() as u16)
         }
-        Element::Text { label, .. } | Element::Select { label, .. } => 1_u16.saturating_add(
-            u16::from(label.as_ref().is_some_and(|label| !label.is_empty())),
-        ),
+        Element::Text { label, .. } => 1_u16.saturating_add(u16::from(
+            label.as_ref().is_some_and(|label| !label.is_empty()),
+        )),
+        Element::Select { label, options, .. } => {
+            u16::from(label.as_ref().is_some_and(|label| !label.is_empty()))
+                .saturating_add(options.len().clamp(1, SELECT_VISIBLE_OPTIONS) as u16)
+        }
         Element::Slider { label, .. } => 1_u16.saturating_add(u16::from(
             label.as_ref().is_some_and(|label| !label.is_empty()),
         )),
@@ -806,5 +1141,137 @@ mod tests {
         let backend = TestBackend::new(20, 8);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+    }
+
+    #[test]
+    fn select_renders_multiple_options() {
+        let dialog: Dialog = serde_json::from_value(serde_json::json!({
+            "children": [
+                {
+                    "type": "select",
+                    "id": "choice",
+                    "label": "Pick one",
+                    "options": ["one", "two", "three", "four"],
+                    "selected": 2
+                }
+            ],
+            "buttons": []
+        }))
+        .unwrap();
+        let mut app = App::new(dialog).unwrap();
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("Pick one"));
+        assert!(rendered.contains("( ) one"));
+        assert!(rendered.contains("( ) two"));
+        assert!(rendered.contains("(*) three"));
+        assert!(rendered.contains("( ) four"));
+    }
+
+    #[test]
+    fn select_scrolls_to_the_selected_option() {
+        let options: Vec<String> = (0..20).map(|index| format!("option {index}")).collect();
+        let dialog: Dialog = serde_json::from_value(serde_json::json!({
+            "children": [
+                {
+                    "type": "select",
+                    "id": "choice",
+                    "label": "Pick one",
+                    "options": options,
+                    "selected": 15
+                }
+            ],
+            "buttons": []
+        }))
+        .unwrap();
+        let mut app = App::new(dialog).unwrap();
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("(*) option 15"));
+        assert!(!rendered.contains("option 0"));
+    }
+
+    #[test]
+    fn select_height_caps_long_lists() {
+        let options: Vec<String> = (0..20).map(|index| format!("option {index}")).collect();
+        let dialog: Dialog = serde_json::from_value(serde_json::json!({
+            "children": [
+                {
+                    "type": "select",
+                    "id": "choice",
+                    "label": "Pick one",
+                    "options": options
+                }
+            ],
+            "buttons": []
+        }))
+        .unwrap();
+        assert_eq!(
+            element_height(&dialog.children[0], 40),
+            1 + SELECT_VISIBLE_OPTIONS as u16
+        );
+    }
+
+    #[test]
+    fn image_element_draws_half_blocks() {
+        let path = std::env::temp_dir().join(format!(
+            "ratl-image-test-{}-{}.png",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut image = image::RgbaImage::new(4, 4);
+        for pixel in image.pixels_mut() {
+            *pixel = image::Rgba([255, 0, 0, 255]);
+        }
+        image
+            .save_with_format(&path, image::ImageFormat::Png)
+            .unwrap();
+
+        let dialog: Dialog = serde_json::from_value(serde_json::json!({
+            "children": [
+                {
+                    "type": "image",
+                    "path": path.to_string_lossy().to_string(),
+                    "height": 4
+                }
+            ],
+            "buttons": []
+        }))
+        .unwrap();
+        let mut app = App::new(dialog).unwrap();
+        let backend = TestBackend::new(40, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("▀"));
+        let _ = std::fs::remove_file(path);
     }
 }

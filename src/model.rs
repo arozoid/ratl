@@ -5,6 +5,7 @@
 //! `id`; that id is used as the key in the result object printed by the binary.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 use ratatui::style::{Color, Modifier, Style};
 use serde::de::Error as _;
@@ -249,18 +250,21 @@ pub struct Theme {
 
 impl Default for Theme {
     fn default() -> Self {
+        // Forest green, matching rstl.sway's foot theme and sway borders.
+        // Explicit RGB colours keep the dialog readable even when the
+        // terminal's palette does not define a pleasant green.
         Self {
             foreground: ColorValue(Color::Reset),
             background: ColorValue(Color::Reset),
             label: ColorValue(Color::Reset),
-            muted: ColorValue(Color::DarkGray),
-            border: ColorValue(Color::Cyan),
-            title: ColorValue(Color::Cyan),
-            accent: ColorValue(Color::LightCyan),
-            focus_foreground: ColorValue(Color::Black),
-            focus_background: ColorValue(Color::Cyan),
-            input_foreground: ColorValue(Color::Reset),
-            input_background: ColorValue(Color::DarkGray),
+            muted: ColorValue(Color::Rgb(101, 155, 117)),
+            border: ColorValue(Color::Rgb(118, 168, 130)),
+            title: ColorValue(Color::Rgb(232, 245, 234)),
+            accent: ColorValue(Color::Rgb(131, 179, 148)),
+            focus_foreground: ColorValue(Color::Rgb(23, 26, 24)),
+            focus_background: ColorValue(Color::Rgb(118, 168, 130)),
+            input_foreground: ColorValue(Color::Rgb(224, 230, 224)),
+            input_background: ColorValue(Color::Rgb(37, 40, 37)),
             danger: ColorValue(Color::LightRed),
             error: ColorValue(Color::Red),
         }
@@ -334,6 +338,29 @@ impl Align {
             Self::Right => ratatui::layout::Alignment::Right,
         }
     }
+}
+
+/// How an image is fitted into the space its element was given.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageFit {
+    /// Preserve the aspect ratio and leave empty space around the image.
+    #[default]
+    Contain,
+    /// Preserve the aspect ratio and crop the image to fill the space.
+    Cover,
+    /// Stretch the image to the exact size of the element.
+    Stretch,
+}
+
+/// Vertical placement of an image inside its element.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VerticalAlign {
+    Top,
+    #[default]
+    Center,
+    Bottom,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -462,6 +489,29 @@ pub enum Element {
         #[serde(default = "default_spacer")]
         height: u16,
     },
+    Image {
+        /// Image file to display. Relative paths are resolved against the
+        /// directory that contains the dialog file.
+        path: String,
+        /// Height in terminal rows.
+        #[serde(default = "default_image_height")]
+        height: u16,
+        /// Maximum width in terminal cells. The image is aligned inside this
+        /// width; without it the element uses the full available width.
+        #[serde(default)]
+        width: Option<Dimension>,
+        #[serde(default)]
+        fit: ImageFit,
+        #[serde(default = "default_image_align")]
+        align: Align,
+        #[serde(default)]
+        valign: VerticalAlign,
+        /// Text shown when the image cannot be loaded.
+        #[serde(default)]
+        alt: Option<String>,
+        #[serde(default)]
+        style: StyleSpec,
+    },
     Box {
         #[serde(default)]
         title: Option<String>,
@@ -563,6 +613,12 @@ pub enum Element {
 fn default_spacer() -> u16 {
     1
 }
+fn default_image_height() -> u16 {
+    12
+}
+fn default_image_align() -> Align {
+    Align::Center
+}
 fn default_padding() -> u16 {
     1
 }
@@ -605,6 +661,10 @@ impl Element {
 pub struct Dialog {
     #[serde(rename = "$schema", default)]
     pub schema: Option<String>,
+    /// Directory used to resolve relative image paths. This is set by the
+    /// loader, not by the JSON document.
+    #[serde(skip)]
+    pub base_dir: Option<PathBuf>,
     #[serde(default = "default_title")]
     pub title: String,
     #[serde(default)]
@@ -742,6 +802,22 @@ fn validate_elements(elements: &[Element], ids: &mut HashSet<String>) -> Result<
                     ));
                 }
             }
+            Element::Image {
+                path,
+                height,
+                width,
+                ..
+            } => {
+                if path.trim().is_empty() {
+                    return Err("image path must not be empty".to_owned());
+                }
+                if *height == 0 {
+                    return Err("image height must be greater than zero".to_owned());
+                }
+                if matches!(width, Some(Dimension::Cells(0))) {
+                    return Err("image width must be greater than zero".to_owned());
+                }
+            }
             Element::Grid { columns: 0, .. } => {
                 return Err("grid columns must be greater than zero".to_owned());
             }
@@ -831,5 +907,36 @@ mod tests {
                 .unwrap_err()
                 .contains("min greater than max")
         );
+    }
+
+    #[test]
+    fn image_defaults_parse_and_validate() {
+        let dialog: Dialog =
+            serde_json::from_str(r#"{"children":[{"type":"image","path":"preview.png"}]}"#)
+                .unwrap();
+        let Element::Image {
+            height,
+            width,
+            fit,
+            align,
+            valign,
+            ..
+        } = &dialog.children[0]
+        else {
+            panic!("expected an image element");
+        };
+        assert_eq!(*height, 12);
+        assert_eq!(*width, None);
+        assert_eq!(*fit, ImageFit::Contain);
+        assert_eq!(*align, Align::Center);
+        assert_eq!(*valign, VerticalAlign::Center);
+        dialog.validate().unwrap();
+    }
+
+    #[test]
+    fn empty_image_path_is_rejected() {
+        let dialog: Dialog =
+            serde_json::from_str(r#"{"children":[{"type":"image","path":""}]}"#).unwrap();
+        assert!(dialog.validate().unwrap_err().contains("path"));
     }
 }
